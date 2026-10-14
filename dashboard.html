@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>滿意度調查 - 統計面板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-8 font-sans">
+    
+    <div class="max-w-6xl mx-auto bg-white rounded-xl shadow-lg p-8">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">📊 滿意度調查統計面板</h1>
+            <button id="refresh-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200">
+                重新整理資料
+            </button>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white border border-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="py-3 px-4 border-b text-left text-sm font-semibold text-gray-700">單位</th>
+                        <th class="py-3 px-4 border-b text-left text-sm font-semibold text-gray-700">窗口</th>
+                        <th class="py-3 px-4 border-b text-center text-sm font-semibold text-gray-700">非常滿意 😊</th>
+                        <th class="py-3 px-4 border-b text-center text-sm font-semibold text-gray-700">滿意 🙂</th>
+                        <th class="py-3 px-4 border-b text-center text-sm font-semibold text-gray-700">普通 😐</th>
+                        <th class="py-3 px-4 border-b text-center text-sm font-semibold text-gray-700">不滿意 🙁</th>
+                        <th class="py-3 px-4 border-b text-center text-sm font-semibold text-gray-700">非常不滿意 😠</th>
+                        <th class="py-3 px-4 border-b text-center text-sm font-semibold text-gray-700 bg-blue-50">總票數</th>
+                    </tr>
+                </thead>
+                <tbody id="stats-table-body" class="divide-y divide-gray-200">
+                    <!-- 資料將透過 JavaScript 動態載入於此 -->
+                    <tr>
+                        <td colspan="8" class="py-10 text-center text-gray-500">資料載入中...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // 貼上你的 Firebase 設定 (與 index.html 的相同)
+        const firebaseConfig = {
+            apiKey: "AIzaSyBMHunuQAkbr8e0O-1DhEC7BKYOyNpE76w",
+            authDomain: "satisfaction-58c97.firebaseapp.com",
+            projectId: "satisfaction-58c97",
+            storageBucket: "satisfaction-58c97.firebasestorage.app",
+            messagingSenderId: "265026209433",
+            appId: "1:265026209433:web:5225f99e256b47ead6da08"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // 定義滿意度選項，用來確保資料結構完整
+        const options = ["非常滿意", "滿意", "普通", "不滿意", "非常不滿意"];
+
+        async function loadStats() {
+            const tbody = document.getElementById('stats-table-body');
+            tbody.innerHTML = '<tr><td colspan="8" class="py-10 text-center text-gray-500">資料載入中...</td></tr>';
+            
+            try {
+                // 1. 從 Firestore 抓取所有問卷資料
+                const querySnapshot = await getDocs(collection(db, "surveys"));
+                
+                // 2. 用來存放統計結果的物件
+                const statsMap = {};
+
+                // 3. 遍歷每一筆資料進行分組與加總
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const unit = data.unit || '未知單位';
+                    const win = data.window || '未知窗口';
+                    const satisfaction = data.satisfaction;
+                    
+                    // 建立一個獨一無二的 key (例如 "臺中所_1號窗口")
+                    const key = `${unit}_${win}`;
+
+                    // 如果這個單位+窗口是第一次出現，先初始化它的計數器
+                    if (!statsMap[key]) {
+                        statsMap[key] = {
+                            unit: unit,
+                            window: win,
+                            total: 0,
+                            counts: {
+                                "非常滿意": 0, "滿意": 0, "普通": 0, "不滿意": 0, "非常不滿意": 0
+                            }
+                        };
+                    }
+
+                    // 將該滿意度的票數 +1，總票數 +1
+                    if (statsMap[key].counts[satisfaction] !== undefined) {
+                        statsMap[key].counts[satisfaction]++;
+                        statsMap[key].total++;
+                    }
+                });
+
+                // 4. 將統計結果轉為陣列，並繪製到表格上
+                tbody.innerHTML = ''; // 清空載入中提示
+                
+                const statsArray = Object.values(statsMap);
+                
+                if (statsArray.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="py-10 text-center text-gray-500">目前還沒有任何問卷資料。</td></tr>';
+                    return;
+                }
+
+                // 依照單位和窗口簡單排序
+                statsArray.sort((a, b) => a.unit.localeCompare(b.unit) || a.window.localeCompare(b.window));
+
+                statsArray.forEach(stat => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-gray-50 transition duration-150";
+                    
+                    tr.innerHTML = `
+                        <td class="py-3 px-4 whitespace-nowrap font-medium text-gray-800">${stat.unit}</td>
+                        <td class="py-3 px-4 whitespace-nowrap text-gray-600">${stat.window}</td>
+                        <td class="py-3 px-4 text-center text-gray-600">${stat.counts["非常滿意"]}</td>
+                        <td class="py-3 px-4 text-center text-gray-600">${stat.counts["滿意"]}</td>
+                        <td class="py-3 px-4 text-center text-gray-600">${stat.counts["普通"]}</td>
+                        <td class="py-3 px-4 text-center text-gray-600">${stat.counts["不滿意"]}</td>
+                        <td class="py-3 px-4 text-center text-gray-600">${stat.counts["非常不滿意"]}</td>
+                        <td class="py-3 px-4 text-center font-bold text-blue-600 bg-blue-50/50">${stat.total}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+            } catch (error) {
+                console.error("載入統計資料失敗:", error);
+                tbody.innerHTML = '<tr><td colspan="8" class="py-10 text-center text-red-500">載入失敗，請檢查 Firebase 設定或網路連線。</td></tr>';
+            }
+        }
+
+        // 綁定重新整理按鈕
+        document.getElementById('refresh-btn').addEventListener('click', loadStats);
+
+        // 頁面載入時自動執行一次統計
+        window.onload = loadStats;
+    </script>
+</body>
+</html>
