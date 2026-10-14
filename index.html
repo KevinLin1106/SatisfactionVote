@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>服務滿意度調查</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 QRCode.js 用於產生 QR Code -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4 font-sans">
+    
+    <div id="app" class="bg-white rounded-xl shadow-lg p-6 w-full max-w-md">
+        
+        <!-- 1. 後台建立問卷畫面 (調查小組使用) -->
+        <div id="setup-view" class="hidden">
+            <h1 class="text-2xl font-bold text-center mb-6 text-gray-800">建立專屬滿意度調查</h1>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="unit-name">
+                    單位名稱
+                </label>
+                <input id="unit-name" type="text" class="shadow-sm appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="例如：臺中所">
+            </div>
+            <div class="mb-6">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="window-number">
+                    窗口號碼
+                </label>
+                <input id="window-number" type="text" class="shadow-sm appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="例如：1號窗口">
+            </div>
+            <button onclick="generateQR()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200">
+                產生問卷連結與 QR Code
+            </button>
+
+            <div id="qr-result" class="mt-8 hidden flex-col items-center border-t pt-6">
+                <h2 class="text-lg font-bold mb-4 text-gray-800">請民眾掃描下方 QR Code</h2>
+                <div id="qrcode" class="mb-4 p-2 bg-white border rounded shadow-sm"></div>
+                <a id="survey-link" href="#" target="_blank" class="text-sm text-blue-600 hover:text-blue-800 break-all text-center px-4"></a>
+            </div>
+        </div>
+
+        <!-- 2. 前台問卷畫面 (民眾掃碼後使用) -->
+        <div id="survey-view" class="hidden">
+            <h1 class="text-2xl font-bold text-center mb-4 text-gray-800">服務滿意度調查</h1>
+            <div class="bg-blue-50 text-blue-800 p-4 rounded-lg text-center mb-6 shadow-inner">
+                <p class="mb-1 text-sm">正在為以下服務評分：</p>
+                <p class="text-lg font-bold"><span id="display-unit"></span> - <span id="display-window"></span></p>
+            </div>
+
+            <form id="survey-form" onsubmit="submitSurvey(event)">
+                <div class="space-y-3 mb-6">
+                    <label class="flex items-center p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition duration-150">
+                        <input type="radio" name="satisfaction" value="非常滿意" required class="h-5 w-5 text-blue-600">
+                        <span class="ml-3 text-gray-700 font-medium text-lg">非常滿意 😊</span>
+                    </label>
+                    <label class="flex items-center p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition duration-150">
+                        <input type="radio" name="satisfaction" value="滿意" class="h-5 w-5 text-blue-600">
+                        <span class="ml-3 text-gray-700 font-medium text-lg">滿意 🙂</span>
+                    </label>
+                    <label class="flex items-center p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition duration-150">
+                        <input type="radio" name="satisfaction" value="普通" class="h-5 w-5 text-blue-600">
+                        <span class="ml-3 text-gray-700 font-medium text-lg">普通 😐</span>
+                    </label>
+                    <label class="flex items-center p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition duration-150">
+                        <input type="radio" name="satisfaction" value="不滿意" class="h-5 w-5 text-blue-600">
+                        <span class="ml-3 text-gray-700 font-medium text-lg">不滿意 🙁</span>
+                    </label>
+                    <label class="flex items-center p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition duration-150">
+                        <input type="radio" name="satisfaction" value="非常不滿意" class="h-5 w-5 text-blue-600">
+                        <span class="ml-3 text-gray-700 font-medium text-lg">非常不滿意 😠</span>
+                    </label>
+                </div>
+                <button type="submit" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow transition duration-200 text-lg">
+                    送出評價
+                </button>
+            </form>
+        </div>
+
+        <!-- 3. 完成畫面 -->
+        <div id="thank-you-view" class="hidden text-center py-10">
+            <div class="text-6xl mb-4">🙏</div>
+            <h2 class="text-2xl font-bold text-gray-800 mb-2">感謝您的寶貴意見！</h2>
+            <p class="text-gray-600">您的回饋是我們進步的最大動力。</p>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // 1. 引入 Firebase 核心與 Firestore 模組 (Firebase v10)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // 2. 貼上你的 Firebase 設定 (請替換為你專案的實際數值)
+        const firebaseConfig = {
+            apiKey: "AIzaSyBMHunuQAkbr8e0O-1DhEC7BKYOyNpE76w",
+            authDomain: "satisfaction-58c97.firebaseapp.com",
+            projectId: "satisfaction-58c97",
+            storageBucket: "satisfaction-58c97.firebasestorage.app",
+            messagingSenderId: "265026209433",
+            appId: "1:265026209433:web:5225f99e256b47ead6da08"
+        };
+
+        // 初始化 Firebase 與 Firestore
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // 取得 URL 參數
+        const urlParams = new URLSearchParams(window.location.search);
+        const unitParam = urlParams.get('unit');
+        const windowParam = urlParams.get('window');
+
+        // 頁面初始化邏輯
+        document.addEventListener('DOMContentLoaded', () => {
+            if (unitParam && windowParam) {
+                // 顯示前台問卷畫面
+                document.getElementById('display-unit').textContent = unitParam;
+                document.getElementById('display-window').textContent = windowParam;
+                document.getElementById('survey-view').classList.remove('hidden');
+            } else {
+                // 顯示後台建立畫面
+                document.getElementById('setup-view').classList.remove('hidden');
+            }
+        });
+
+        // 綁定「產生 QR Code」按鈕事件
+        let qrcode = null;
+        document.querySelector('button[onclick="generateQR()"]').onclick = null; // 清除原有的 onclick 屬性
+        document.querySelector('#setup-view button').addEventListener('click', () => {
+            const unit = document.getElementById('unit-name').value.trim();
+            const win = document.getElementById('window-number').value.trim();
+
+            if (!unit || !win) {
+                alert('請輸入單位名稱與窗口號碼');
+                return;
+            }
+
+            const baseUrl = window.location.origin + window.location.pathname;
+            const surveyUrl = `${baseUrl}?unit=${encodeURIComponent(unit)}&window=${encodeURIComponent(win)}`;
+
+            const qrResult = document.getElementById('qr-result');
+            qrResult.classList.remove('hidden');
+            qrResult.classList.add('flex');
+
+            const linkElement = document.getElementById('survey-link');
+            linkElement.href = surveyUrl;
+            linkElement.textContent = surveyUrl;
+
+            const qrContainer = document.getElementById('qrcode');
+            qrContainer.innerHTML = ''; 
+            
+            qrcode = new QRCode(qrContainer, {
+                text: surveyUrl,
+                width: 200,
+                height: 200,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+        });
+
+        // 綁定問卷表單送出事件並寫入 Firestore
+        document.getElementById('survey-form').onsubmit = null; // 清除原有的 onsubmit 屬性
+        document.getElementById('survey-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            
+            // 防呆：鎖定送出按鈕，避免民眾重複點擊
+            const submitBtn = event.target.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '資料送出中...';
+            submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+            
+            const formData = new FormData(event.target);
+            const satisfaction = formData.get('satisfaction');
+            
+            try {
+                // 寫入 Firestore 的 surveys 集合
+                await addDoc(collection(db, "surveys"), {
+                    unit: unitParam,
+                    window: windowParam,
+                    satisfaction: satisfaction,
+                    timestamp: serverTimestamp() // 記錄填寫時間
+                });
+
+                // 成功寫入後，切換至感謝畫面
+                document.getElementById('survey-view').classList.add('hidden');
+                document.getElementById('thank-you-view').classList.remove('hidden');
+                
+            } catch (error) {
+                console.error("寫入資料庫時發生錯誤: ", error);
+                alert("抱歉，資料送出失敗，請稍後再試。");
+                // 恢復按鈕狀態
+                submitBtn.disabled = false;
+                submitBtn.textContent = '送出評價';
+                submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+            }
+        });
+    </script>
+</body>
+</html>
