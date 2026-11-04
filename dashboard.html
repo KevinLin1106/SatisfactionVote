@@ -14,6 +14,9 @@
             <button id="refresh-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200">
                 重新整理資料
             </button>
+            <button id="export-csv-btn" class="ml-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-200">
+                    匯出 CSV
+            </button>
         </div>
 
         <div class="overflow-x-auto">
@@ -55,36 +58,31 @@
             appId: "1:265026209433:web:5225f99e256b47ead6da08"
         };
 
-        const app = initializeApp(firebaseConfig);
+const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
-
-        // 2分鐘的毫秒數 (120,000 毫秒)
         const COOLDOWN_MS = 120000;
+
+        // 1. 新增一個全域變數，用來暫存準備匯出的資料
+        let currentStatsArray = [];
 
         async function loadStats() {
             const tbody = document.getElementById('stats-table-body');
-            // 注意：這裡多加了一個 <th>對應的 colspan，配合新增的過濾欄位
             tbody.innerHTML = '<tr><td colspan="9" class="py-10 text-center text-gray-500">資料載入與分析中...</td></tr>';
             
             try {
                 const querySnapshot = await getDocs(collection(db, "surveys"));
                 
-                // 將資料轉為陣列，過濾掉沒有時間戳記的異常資料
                 let docsArray = [];
                 querySnapshot.forEach((doc) => {
                     const data = doc.data();
-                    if (data.timestamp) {
-                        docsArray.push(data);
-                    }
+                    if (data.timestamp) docsArray.push(data);
                 });
 
-                // 核心步驟 1：依據時間先後順序排序 (舊 -> 新)
                 docsArray.sort((a, b) => a.timestamp.toMillis() - b.timestamp.toMillis());
 
                 const statsMap = {};
-                const lastValidVoteTime = {}; // 用來記錄各窗口「最後一次有效票」的時間
+                const lastValidVoteTime = {}; 
 
-                // 核心步驟 2：遍歷檢查與加總
                 docsArray.forEach((data) => {
                     const unit = data.unit || '未知單位';
                     const win = data.window || '未知窗口';
@@ -95,26 +93,18 @@
 
                     if (!statsMap[key]) {
                         statsMap[key] = {
-                            unit: unit,
-                            window: win,
-                            total: 0,
-                            invalidTotal: 0, // 記錄被過濾的票數
-                            counts: {
-                                "非常滿意": 0, "滿意": 0, "普通": 0, "不滿意": 0, "非常不滿意": 0
-                            }
+                            unit: unit, window: win, total: 0, invalidTotal: 0,
+                            counts: { "非常滿意": 0, "滿意": 0, "普通": 0, "不滿意": 0, "非常不滿意": 0 }
                         };
                         lastValidVoteTime[key] = 0;
                     }
 
-                    // 檢查是否距離上一張有效票超過 2 分鐘
                     if (currentTime - lastValidVoteTime[key] < COOLDOWN_MS && lastValidVoteTime[key] !== 0) {
-                        // 兩分鐘內的重複投票 -> 判定為無效，過濾數 +1，跳過後續加總
                         statsMap[key].invalidTotal++;
                         return; 
                     }
 
-                    // 距離超過兩分鐘 -> 判定為有效票
-                    lastValidVoteTime[key] = currentTime; // 更新該窗口最後一次有效投票的時間
+                    lastValidVoteTime[key] = currentTime; 
                     
                     if (statsMap[key].counts[satisfaction] !== undefined) {
                         statsMap[key].counts[satisfaction]++;
@@ -123,19 +113,20 @@
                 });
 
                 tbody.innerHTML = ''; 
-                const statsArray = Object.values(statsMap);
                 
-                if (statsArray.length === 0) {
+                // 2. 將算好的結果存入全域變數，供匯出功能使用
+                currentStatsArray = Object.values(statsMap);
+                
+                if (currentStatsArray.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="9" class="py-10 text-center text-gray-500">目前還沒有任何問卷資料。</td></tr>';
                     return;
                 }
 
-                statsArray.sort((a, b) => a.unit.localeCompare(b.unit) || a.window.localeCompare(b.window));
+                currentStatsArray.sort((a, b) => a.unit.localeCompare(b.unit) || a.window.localeCompare(b.window));
 
-                statsArray.forEach(stat => {
+                currentStatsArray.forEach(stat => {
                     const tr = document.createElement('tr');
                     tr.className = "hover:bg-gray-50 transition duration-150";
-                    
                     tr.innerHTML = `
                         <td class="py-3 px-4 whitespace-nowrap font-medium text-gray-800">${stat.unit}</td>
                         <td class="py-3 px-4 whitespace-nowrap text-gray-600">${stat.window}</td>
@@ -145,18 +136,67 @@
                         <td class="py-3 px-4 text-center text-gray-600">${stat.counts["不滿意"]}</td>
                         <td class="py-3 px-4 text-center text-gray-600">${stat.counts["非常不滿意"]}</td>
                         <td class="py-3 px-4 text-center font-bold text-blue-600 bg-blue-50/50">${stat.total}</td>
-                        <td class="py-3 px-4 text-center font-bold text-red-500 bg-red-50/30" title="2分鐘內重複送出的無效票">${stat.invalidTotal}</td>
+                        <td class="py-3 px-4 text-center font-bold text-red-500 bg-red-50/30">${stat.invalidTotal}</td>
                     `;
                     tbody.appendChild(tr);
                 });
 
             } catch (error) {
                 console.error("載入統計資料失敗:", error);
-                tbody.innerHTML = '<tr><td colspan="9" class="py-10 text-center text-red-500">載入失敗，請檢查 Firebase 設定或網路連線。</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="py-10 text-center text-red-500">載入失敗，請檢查網路連線。</td></tr>';
             }
         }
 
+        // 3. 實作 CSV 匯出功能
+        function exportToCSV() {
+            if (currentStatsArray.length === 0) {
+                alert("目前沒有資料可以匯出");
+                return;
+            }
+
+            // \uFEFF 是 UTF-8 BOM，讓 Excel 知道這是 UTF-8 編碼，避免中文亂碼
+            let csvContent = "\uFEFF"; 
+            
+            // 寫入標題列
+            csvContent += "單位,窗口,非常滿意,滿意,普通,不滿意,非常不滿意,總有效票數,擋下的無效票\n";
+
+            // 逐行寫入資料
+            currentStatsArray.forEach(stat => {
+                const row = [
+                    stat.unit,
+                    stat.window,
+                    stat.counts["非常滿意"],
+                    stat.counts["滿意"],
+                    stat.counts["普通"],
+                    stat.counts["不滿意"],
+                    stat.counts["非常不滿意"],
+                    stat.total,
+                    stat.invalidTotal
+                ];
+                csvContent += row.join(",") + "\n";
+            });
+
+            // 建立 Blob 與虛擬的下載連結
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            
+            // 設定下載檔名 (自動壓上當天日期)
+            const dateString = new Date().toISOString().split('T')[0];
+            link.setAttribute("href", url);
+            link.setAttribute("download", `滿意度統計報表_${dateString}.csv`);
+            link.style.visibility = 'hidden';
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
         document.getElementById('refresh-btn').addEventListener('click', loadStats);
+        
+        // 4. 綁定匯出按鈕的點擊事件
+        document.getElementById('export-csv-btn').addEventListener('click', exportToCSV);
+
         window.onload = loadStats;
     </script>
 </body>
